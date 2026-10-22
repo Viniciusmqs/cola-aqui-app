@@ -1,45 +1,44 @@
-import { Link } from 'expo-router';
+import { router } from 'expo-router';
 import { Pressable, StyleSheet, View } from 'react-native';
 
-import { colors, placeKindLabel, radius, space } from '@/constants/theme';
-import { distancia, haQuanto } from '@/lib/format';
+import { categoryLabel, colors, radius, space } from '@/constants/theme';
+import { distancia, tempoDesde } from '@/lib/format';
 import type { NearbyPlace } from '@/lib/types';
 
 import { Txt } from './ui';
 
+/** Lugar em lista. Sem post recente: "Sem atualização recente", nunca movimento simulado (PRD 3.1, QA-12). */
 export function PlaceRow({ place }: { place: NearbyPlace }) {
-  const ativo = place.registros_agora > 0;
+  const recente = place.fresh_posts > 0;
   return (
-    <Link href={{ pathname: '/lugar/[id]', params: { id: place.id } }} asChild>
-      <Pressable style={({ pressed }) => [s.row, pressed && { opacity: 0.8 }]} accessibilityRole="link">
-        <View style={[s.dot, { backgroundColor: ativo ? colors.pulso : colors.carvao3 }]} />
-        <View style={{ flex: 1 }}>
-          <Txt variant="label">{place.nome}</Txt>
-          <Txt variant="small" color={colors.mut}>
-            {placeKindLabel[place.tipo] ?? place.tipo}
-            {place.bairro ? ` · ${place.bairro}` : ''} · {distancia(place.distancia_m)}
+    <Pressable
+      onPress={() => router.push({ pathname: '/lugar/[id]', params: { id: place.id } })}
+      style={({ pressed }) => [s.row, pressed && { opacity: 0.8 }]}
+      accessibilityRole="link">
+      <View style={[s.dot, { backgroundColor: recente ? colors.pulso : colors.carvao3 }]} />
+      <View style={{ flex: 1 }}>
+        <Txt variant="label" numberOfLines={1}>
+          {place.name}
+        </Txt>
+        <Txt variant="small" color={colors.mut} numberOfLines={1}>
+          {categoryLabel[place.category] ?? place.category}
+          {place.neighborhood ? ` · ${place.neighborhood}` : ''} · {distancia(place.distance_m)}
+        </Txt>
+      </View>
+      <View style={{ alignItems: 'flex-end', maxWidth: 130 }}>
+        {recente ? (
+          <Txt variant="small" color={colors.pulso}>
+            {place.fresh_posts === 1 ? '1 vídeo recente' : `${place.fresh_posts} vídeos recentes`}
           </Txt>
-        </View>
-        <View style={{ alignItems: 'flex-end' }}>
-          {ativo ? (
-            <>
-              <Txt variant="label" color={colors.pulso}>
-                {place.registros_agora} {place.registros_agora === 1 ? 'registro' : 'registros'}
-              </Txt>
-              {place.ultimo_registro ? (
-                <Txt variant="caption" color={colors.mut}>
-                  último {haQuanto(place.ultimo_registro)}
-                </Txt>
-              ) : null}
-            </>
-          ) : (
-            <Txt variant="caption" color={colors.mut}>
-              sem registros agora
-            </Txt>
-          )}
-        </View>
-      </Pressable>
-    </Link>
+        ) : (
+          <Txt variant="caption" color={colors.mut} style={{ textAlign: 'right' }}>
+            {place.last_published_at
+              ? `Último vídeo ${tempoDesde(place.last_published_at)}`
+              : 'Sem atualização recente'}
+          </Txt>
+        )}
+      </View>
+    </Pressable>
   );
 }
 

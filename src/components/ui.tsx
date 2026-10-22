@@ -15,7 +15,10 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { colors, fonts, originLabel, radius, space } from '@/constants/theme';
+import { router } from 'expo-router';
+
+import { colors, fonts, radius, space } from '@/constants/theme';
+import { rotuloPublicacao } from '@/lib/format';
 import type { PostOrigin } from '@/lib/types';
 
 type Variant = 'display' | 'title' | 'body' | 'label' | 'small' | 'caption';
@@ -57,7 +60,11 @@ export function Screen({
 export function Logo({ size = 28 }: { size?: number }) {
   return (
     <Txt variant="title" style={{ fontSize: size, lineHeight: size * 1.05 }}>
-      cola<Txt variant="title" color={colors.pulso} style={{ fontSize: size, lineHeight: size * 1.05 }}> aqui</Txt>
+      cola
+      <Txt variant="title" color={colors.pulso} style={{ fontSize: size, lineHeight: size * 1.05 }}>
+        {' '}
+        aqui
+      </Txt>
     </Txt>
   );
 }
@@ -186,32 +193,81 @@ const c = StyleSheet.create({
   },
 });
 
-/** Selo de tempo + origem: todo registro mostra "há X min" e de onde veio. */
-export function TimeOriginTag({ ha, origem }: { ha: string; origem: PostOrigin }) {
-  const dot = origem === 'comunidade' ? colors.pulso : origem === 'estabelecimento' ? colors.algodao : colors.violeta;
+/** "Publicado há 8 min · Usuário" + selo de patrocínio quando houver (PRD 5.1, 5.3). */
+export function PublishedTag({
+  publishedAt,
+  origin,
+  sponsored,
+  fresh,
+}: {
+  publishedAt: string;
+  origin: PostOrigin;
+  sponsored?: boolean;
+  fresh?: boolean;
+}) {
   return (
-    <View style={o.tag}>
-      <View style={[o.dot, { backgroundColor: dot }]} />
-      <Txt variant="caption" color={colors.neblina}>
-        {ha} · {originLabel[origem]}
-      </Txt>
+    <View style={o.row}>
+      <View style={o.tag}>
+        <View style={[o.dot, { backgroundColor: fresh ? colors.pulso : colors.mut }]} />
+        <Txt variant="caption" color={colors.neblina}>
+          {rotuloPublicacao(publishedAt, origin)}
+        </Txt>
+      </View>
+      {sponsored ? (
+        <View style={[o.tag, { backgroundColor: colors.violeta }]}>
+          <Txt variant="caption" color={colors.neblina}>
+            Patrocinado
+          </Txt>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const o = StyleSheet.create({
+  row: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
   tag: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     alignSelf: 'flex-start',
-    backgroundColor: 'rgba(23,33,31,0.72)',
+    backgroundColor: 'rgba(23,33,31,0.78)',
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: radius.pill,
   },
   dot: { width: 7, height: 7, borderRadius: 4 },
 });
+
+/** Bloco para abas que exigem conta (Publicar, Salvos, Perfil). */
+export function LoginGate({ title, text }: { title: string; text: string }) {
+  return (
+    <Screen style={{ justifyContent: 'center' }}>
+      <Empty
+        title={title}
+        text={text}
+        action={
+          <View style={{ gap: space.sm }}>
+            <Button title="Entrar" onPress={() => router.push('/entrar')} />
+            <Button
+              title="Criar conta"
+              kind="ghost"
+              onPress={() => router.push({ pathname: '/entrar', params: { modo: 'criar' } })}
+            />
+          </View>
+        }
+      />
+    </Screen>
+  );
+}
+
+export function SectionTitle({ children }: { children: ReactNode }) {
+  return (
+    <Txt variant="label" style={{ marginTop: space.lg, marginBottom: space.sm }}>
+      {children}
+    </Txt>
+  );
+}
 
 export function Empty({ title, text, action }: { title: string; text: string; action?: ReactNode }) {
   return (
