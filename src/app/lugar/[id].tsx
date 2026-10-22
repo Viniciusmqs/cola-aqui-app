@@ -1,125 +1,282 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
 import * as Linking from 'expo-linking';
-import { Redirect, router, useLocalSearchParams } from 'expo-router';
-import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { router, useLocalSearchParams } from 'expo-router';
+import { useEffect, useMemo, useState } from 'react';
+import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 
-import { Button, Empty, Screen, TimeOriginTag, Txt } from '@/components/ui';
-import { colors, placeKindLabel, radius, space } from '@/constants/theme';
-import { haQuanto } from '@/lib/format';
-import { useAuth } from '@/lib/auth';
-import { usePlace, usePlacePosts } from '@/lib/queries';
-import type { PlaceDetail, PostOrigin } from '@/lib/types';
+import { ChoiceSheet } from '@/components/choice-sheet';
+import { PlacePostCard } from '@/components/post-card';
+import { Button, Empty, Screen, SectionTitle, Txt } from '@/components/ui';
+import { categoryLabel, colors, radius, space } from '@/constants/theme';
+import { abrirRota, compartilharLugar, denunciaChoices, denunciar, rotaChoices } from '@/lib/actions';
+import { track } from '@/lib/analytics';
+import { useAuth, useRequireAuth } from '@/lib/auth';
+import { dataEvento, diaSemana, horaCurta, tempoDesde } from '@/lib/format';
+import { usePlace, usePlaceInfo, usePlacePosts, useSaved, useToggleSave } from '@/lib/queries';
 
-function abrirRota(p: PlaceDetail, app: 'maps' | 'waze' | 'uber') {
-  const nome = encodeURIComponent(p.nome);
-  const url = {
-    maps:
-      Platform.OS === 'ios'
-        ? `https://maps.apple.com/?daddr=${p.lat},${p.lng}&q=${nome}`
-        : `https://www.google.com/maps/dir/?api=1&destination=${p.lat},${p.lng}`,
-    waze: `https://waze.com/ul?ll=${p.lat},${p.lng}&navigate=yes`,
-    uber: `https://m.uber.com/ul/?action=setPickup&pickup=my_location&dropoff[latitude]=${p.lat}&dropoff[longitude]=${p.lng}&dropoff[nickname]=${nome}`,
-  }[app];
-  Linking.openURL(url);
-}
-
-function chamarGalera(p: PlaceDetail, registros: number) {
-  const status = registros > 0 ? `tem ${registros} ${registros === 1 ? 'registro' : 'registros'} de agora lá` : 'bora ver como tá';
-  const texto = `Bora no ${p.nome}? ${status} 👀 Vi no Cola Aqui`;
-  Linking.openURL(`https://wa.me/?text=${encodeURIComponent(texto)}`);
-}
-
-type PlacePost = {
-  id: string;
-  created_at: string;
-  origem: PostOrigin;
-  legenda: string | null;
-  autor: { username: string } | { username: string }[] | null;
-};
-
-const autorDe = (a: PlacePost['autor']) => (Array.isArray(a) ? a[0]?.username : a?.username) ?? '';
-
+/** Perfil do lugar (RF-05) com compartilhar, chegar e salvar (RF-08, RF-09). */
 export default function Lugar() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { session } = useAuth();
+  const requireAuth = useRequireAuth();
   const place = usePlace(id);
   const posts = usePlacePosts(id);
+  const info = usePlaceInfo(id);
+  const saved = useSaved();
+  const toggle = useToggleSave();
+  const [rota, setRota] = useState(false);
+  const [denuncia, setDenuncia] = useState(false);
+  const [visivel, setVisivel] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (id) track('place_view', { place: id });
+  }, [id]);
+
+  const salvo = useMemo(
+    () => !!session && ((saved.data ?? []) as { place_id: string }[]).some((s) => s.place_id === id),
+    [saved.data, id, session],
+  );
+
   const p = place.data;
-  const lista = (posts.data ?? []) as PlacePost[];
-  if (!session) return <Redirect href="/entrar" />;
+  const lista = posts.data ?? [];
+  const hoje = new Date().getDay();
+  const horariosHoje = (info.data?.hours ?? []).filter((h) => h.weekday === hoje);
+
+  if (!p) {
+    return (
+      <Screen>
+        <BackBar />
+        {place.isLoading ? null : <Empty title="Lugar não encontrado" text="Ele pode ter saído do catálogo." />}
+      </Screen>
+    );
+  }
+
+  const destino = { id: p.id, name: p.name, lat: p.lat, lng: p.lng, address: p.address };
 
   return (
     <Screen>
-      <View style={s.top}>
-        <Pressable onPress={() => router.back()} hitSlop={12} accessibilityLabel="Voltar">
-          <Ionicons name="chevron-back" size={28} color={colors.neblina} />
-        </Pressable>
-      </View>
-      {!p ? (
-        place.isLoading ? null : <Empty title="Lugar não encontrado" text="Ele pode ter saído do app." />
-      ) : (
-        <ScrollView contentContainerStyle={{ padding: space.md, gap: space.lg }}>
-          <View style={{ gap: space.xs }}>
-            <Txt variant="display">{p.nome}</Txt>
-            <Txt color={colors.mut}>
-              {placeKindLabel[p.tipo] ?? p.tipo}
-              {p.bairro ? ` · ${p.bairro}` : ''}
+      <BackBar />
+      <ScrollView contentContainerStyle={{ padding: space.md, paddingBottom: space.xxl }}>
+        <View style={{ gap: space.xs }}>
+          <Txt variant="display">{p.name}</Txt>
+          <Txt color={colors.mut}>
+            {categoryLabel[p.category] ?? p.category}
+            {p.neighborhood ? ` · ${p.neighborhood}` : ''}
+          </Txt>
+          {p.address ? (
+            <Txt variant="small" color={colors.mut}>
+              {p.address}
             </Txt>
-            {p.endereco ? <Txt variant="small" color={colors.mut}>{p.endereco}</Txt> : null}
-            {p.fundador ? (
-              <View style={s.selo}>
-                <Txt variant="caption" color={colors.carvao}>
-                  PARCEIRO FUNDADOR
-                </Txt>
-              </View>
+          ) : null}
+          <View style={s.badges}>
+            {p.is_founder ? <Badge label="PARCEIRO FUNDADOR" bg={colors.pulso} fg={colors.carvao} /> : null}
+            {p.has_manager ? (
+              <Badge label="Informações oficiais do estabelecimento" bg={colors.carvao2} fg={colors.neblina} />
             ) : null}
           </View>
+          <Txt
+            variant="small"
+            color={p.last_published_at ? colors.neblina : colors.mut}
+            style={{ marginTop: space.sm }}>
+            {p.last_published_at
+              ? `Último vídeo publicado ${tempoDesde(p.last_published_at)}`
+              : 'Sem atualização recente'}
+          </Txt>
+        </View>
 
-          <View style={{ gap: space.sm }}>
+        <View style={{ gap: space.sm, marginTop: space.lg }}>
+          <Button
+            title="Como chegar"
+            icon={<Ionicons name="navigate" size={18} color={colors.carvao} />}
+            onPress={() => setRota(true)}
+          />
+          <View style={{ flexDirection: 'row', gap: space.sm }}>
             <Button
-              title="Chamar a galera"
-              kind="rosa"
-              icon={<Ionicons name="logo-whatsapp" size={18} color={colors.neblina} />}
-              onPress={() => chamarGalera(p, lista.length)}
+              title={salvo ? 'Salvo' : 'Salvar'}
+              kind="secondary"
+              style={{ flex: 1 }}
+              icon={
+                <Ionicons
+                  name={salvo ? 'bookmark' : 'bookmark-outline'}
+                  size={18}
+                  color={salvo ? colors.pulso : colors.neblina}
+                />
+              }
+              loading={toggle.isPending}
+              onPress={() => requireAuth('salvar') && toggle.mutate({ placeId: p.id, saved: salvo })}
             />
-            <View style={{ flexDirection: 'row', gap: space.sm }}>
-              <Button title="Rota" kind="secondary" style={{ flex: 1 }} onPress={() => abrirRota(p, 'maps')} />
-              <Button title="Waze" kind="secondary" style={{ flex: 1 }} onPress={() => abrirRota(p, 'waze')} />
-              <Button title="Uber" kind="secondary" style={{ flex: 1 }} onPress={() => abrirRota(p, 'uber')} />
-            </View>
+            <Button
+              title="Compartilhar"
+              kind="secondary"
+              style={{ flex: 1 }}
+              icon={<Ionicons name="share-social-outline" size={18} color={colors.neblina} />}
+              onPress={() => compartilharLugar(destino)}
+            />
           </View>
+        </View>
 
-          <View style={{ gap: space.sm }}>
-            <Txt variant="label">Registros das últimas 4 horas</Txt>
-            {lista.length === 0 ? (
-              <Txt color={colors.mut}>Ninguém postou daqui nas últimas 4 horas.</Txt>
-            ) : (
-              lista.map((post) => (
-                <View key={post.id} style={s.post}>
-                  <TimeOriginTag ha={haQuanto(post.created_at)} origem={post.origem} />
-                  {post.legenda ? <Txt>{post.legenda}</Txt> : null}
+        <SectionTitle>Vídeos</SectionTitle>
+        {lista.length === 0 ? (
+          <Txt color={colors.mut}>Ninguém publicou deste lugar ainda.</Txt>
+        ) : (
+          <FlatList
+            horizontal
+            data={lista}
+            keyExtractor={(x) => x.id}
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: space.sm }}
+            renderItem={({ item }) => (
+              <Pressable
+                onPress={() => setVisivel(visivel === item.id ? null : item.id)}
+                accessibilityLabel="Tocar ou pausar vídeo">
+                <PlacePostCard post={item} placeId={p.id} playing={visivel === item.id} />
+              </Pressable>
+            )}
+          />
+        )}
+
+        {(info.data?.events ?? []).length > 0 ? (
+          <>
+            <SectionTitle>Programação</SectionTitle>
+            {(info.data?.events ?? []).map((e) => (
+              <View key={e.id} style={s.card}>
+                <Txt variant="small" color={colors.pulso}>
+                  {dataEvento(e.starts_at)}
+                </Txt>
+                <Txt variant="label">{e.title}</Txt>
+                {e.description ? (
                   <Txt variant="small" color={colors.mut}>
-                    @{autorDe(post.autor)}
+                    {e.description}
+                  </Txt>
+                ) : null}
+                {e.ticket_url ? (
+                  <Pressable onPress={() => Linking.openURL(e.ticket_url!)}>
+                    <Txt variant="small" color={colors.algodao}>
+                      Ingressos ↗
+                    </Txt>
+                  </Pressable>
+                ) : null}
+              </View>
+            ))}
+            <Txt variant="caption" color={colors.mut}>
+              Programação informada pelo estabelecimento. Evento agendado não indica movimento atual.
+            </Txt>
+          </>
+        ) : null}
+
+        {(info.data?.hours ?? []).length > 0 ? (
+          <>
+            <SectionTitle>Horário informado</SectionTitle>
+            <View style={s.card}>
+              {(info.data?.hours ?? []).map((h) => (
+                <View key={h.id} style={s.hourRow}>
+                  <Txt variant="small" color={h.weekday === hoje ? colors.neblina : colors.mut}>
+                    {diaSemana(h.weekday)}
+                  </Txt>
+                  <Txt variant="small" color={h.weekday === hoje ? colors.neblina : colors.mut}>
+                    {horaCurta(h.opens)} – {horaCurta(h.closes)}
                   </Txt>
                 </View>
-              ))
-            )}
-          </View>
-        </ScrollView>
-      )}
+              ))}
+              {horariosHoje.length === 0 ? (
+                <Txt variant="small" color={colors.mut}>
+                  Sem horário informado para hoje.
+                </Txt>
+              ) : null}
+            </View>
+            <Txt variant="caption" color={colors.mut}>
+              Horário oficial do estabelecimento; não é confirmação em tempo real.
+            </Txt>
+          </>
+        ) : null}
+
+        {p.instagram || p.website || p.phone ? (
+          <>
+            <SectionTitle>Contato</SectionTitle>
+            <View style={{ flexDirection: 'row', gap: space.sm, flexWrap: 'wrap' }}>
+              {p.instagram ? (
+                <Button
+                  title={`@${p.instagram}`}
+                  kind="ghost"
+                  onPress={() => Linking.openURL(`https://instagram.com/${p.instagram}`)}
+                />
+              ) : null}
+              {p.website ? <Button title="Site" kind="ghost" onPress={() => Linking.openURL(p.website!)} /> : null}
+              {p.phone ? <Button title="Ligar" kind="ghost" onPress={() => Linking.openURL(`tel:${p.phone}`)} /> : null}
+            </View>
+          </>
+        ) : null}
+
+        <View style={{ marginTop: space.xl, gap: space.sm }}>
+          {p.can_manage ? (
+            <Button
+              title="Abrir painel do parceiro"
+              kind="secondary"
+              onPress={() => router.push({ pathname: '/parceiro/[id]', params: { id: p.id } })}
+            />
+          ) : (
+            <Pressable
+              onPress={() =>
+                requireAuth('reivindicar') && router.push({ pathname: '/reivindicar/[id]', params: { id: p.id } })
+              }
+              style={{ padding: space.sm }}>
+              <Txt variant="small" color={colors.algodao}>
+                É responsável por este lugar? Reivindique o perfil
+              </Txt>
+            </Pressable>
+          )}
+          <Pressable onPress={() => setDenuncia(true)} style={{ padding: space.sm }}>
+            <Txt variant="small" color={colors.mut}>
+              Denunciar informação errada ou lugar falso
+            </Txt>
+          </Pressable>
+        </View>
+      </ScrollView>
+
+      <ChoiceSheet
+        visible={rota}
+        title={`Como chegar em ${p.name}`}
+        choices={rotaChoices}
+        onClose={() => setRota(false)}
+        onSelect={(app) => abrirRota(destino, app)}
+      />
+      <ChoiceSheet
+        visible={denuncia}
+        title="Denunciar este lugar"
+        choices={denunciaChoices}
+        onClose={() => setDenuncia(false)}
+        onSelect={(reason) => requireAuth('denunciar') && denunciar({ place: p.id }, reason)}
+      />
     </Screen>
   );
 }
 
+function BackBar() {
+  return (
+    <View style={{ paddingHorizontal: space.sm, paddingVertical: space.xs }}>
+      <Pressable
+        onPress={() => (router.canGoBack() ? router.back() : router.replace('/'))}
+        hitSlop={12}
+        accessibilityLabel="Voltar">
+        <Ionicons name="chevron-back" size={28} color={colors.neblina} />
+      </Pressable>
+    </View>
+  );
+}
+
+function Badge({ label, bg, fg }: { label: string; bg: string; fg: string }) {
+  return (
+    <View style={[s.badge, { backgroundColor: bg }]}>
+      <Txt variant="caption" color={fg}>
+        {label}
+      </Txt>
+    </View>
+  );
+}
+
 const s = StyleSheet.create({
-  top: { paddingHorizontal: space.sm, paddingVertical: space.xs },
-  selo: {
-    alignSelf: 'flex-start',
-    backgroundColor: colors.pulso,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    marginTop: space.sm,
-  },
-  post: { gap: 6, padding: space.md, backgroundColor: colors.carvao2, borderRadius: radius.md },
+  badges: { flexDirection: 'row', gap: space.sm, flexWrap: 'wrap', marginTop: space.sm },
+  badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
+  card: { gap: 4, padding: space.md, backgroundColor: colors.carvao2, borderRadius: radius.md, marginBottom: space.sm },
+  hourRow: { flexDirection: 'row', justifyContent: 'space-between' },
 });
