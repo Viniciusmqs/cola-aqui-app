@@ -27,14 +27,7 @@ export const fonts = {
 export const space = { xs: 4, sm: 8, md: 16, lg: 24, xl: 32, xxl: 48 } as const;
 export const radius = { sm: 8, md: 14, lg: 22, pill: 999 } as const;
 
-/** Rótulo de origem: obrigatório em todo registro (regra do manual). */
-export const originLabel = {
-  comunidade: 'registro da comunidade',
-  estabelecimento: 'publicado pelo estabelecimento',
-  patrocinado: 'patrocinado',
-} as const;
-
-export const placeKindLabel: Record<string, string> = {
+export const categoryLabel: Record<string, string> = {
   bar: 'Bar',
   restaurante: 'Restaurante',
   balada: 'Balada',
@@ -45,5 +38,19 @@ export const placeKindLabel: Record<string, string> = {
   cultura: 'Cultura',
   esporte: 'Esporte e lazer',
   atletica: 'Atlética',
+  cafe: 'Café',
   outro: 'Outro',
 };
+
+/** Categorias que aparecem como filtro no Explorar e no Mapa. */
+export const categoryFilters = [
+  'bar',
+  'restaurante',
+  'balada',
+  'casa_de_show',
+  'festa',
+  'cultura',
+  'feira',
+  'cafe',
+  'esporte',
+] as const;
