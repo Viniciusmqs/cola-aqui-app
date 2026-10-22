@@ -1,26 +1,24 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Redirect } from 'expo-router';
 import { Tabs } from 'expo-router/js-tabs';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Txt } from '@/components/ui';
 import { colors, fonts } from '@/constants/theme';
-import { useAuth } from '@/lib/auth';
 
 type IconName = keyof typeof Ionicons.glyphMap;
 
+/** Cinco destinos do MVP (PRD 3): Explorar, Mapa, Publicar, Salvos, Perfil. */
 const TABS: { name: string; label: string; icon: IconName; iconOn: IconName }[] = [
-  { name: 'index', label: 'Agora', icon: 'flash-outline', iconOn: 'flash' },
+  { name: 'index', label: 'Explorar', icon: 'compass-outline', iconOn: 'compass' },
   { name: 'mapa', label: 'Mapa', icon: 'map-outline', iconOn: 'map' },
-  { name: 'postar', label: 'Postar', icon: 'videocam', iconOn: 'videocam' },
+  { name: 'publicar', label: 'Publicar', icon: 'add', iconOn: 'add' },
+  { name: 'salvos', label: 'Salvos', icon: 'bookmark-outline', iconOn: 'bookmark' },
   { name: 'perfil', label: 'Perfil', icon: 'person-outline', iconOn: 'person' },
 ];
 
 export default function TabsLayout() {
   const insets = useSafeAreaInsets();
-  const { session } = useAuth();
-  if (!session) return <Redirect href="/entrar" />;
   return (
     <Tabs
       screenOptions={{ headerShown: false, sceneStyle: { backgroundColor: colors.carvao } }}
@@ -30,7 +28,7 @@ export default function TabsLayout() {
             const tab = TABS.find((t) => t.name === route.name);
             if (!tab) return null;
             const focused = state.index === i;
-            const isPost = tab.name === 'postar';
+            const isPost = tab.name === 'publicar';
             return (
               <Pressable
                 key={route.key}
@@ -43,12 +41,12 @@ export default function TabsLayout() {
                 style={s.item}>
                 {isPost ? (
                   <View style={s.post}>
-                    <Ionicons name="videocam" size={24} color={colors.carvao} />
+                    <Ionicons name="add" size={26} color={colors.carvao} />
                   </View>
                 ) : (
                   <Ionicons
                     name={focused ? tab.iconOn : tab.icon}
-                    size={24}
+                    size={23}
                     color={focused ? colors.pulso : colors.mut}
                   />
                 )}
@@ -80,9 +78,9 @@ const s = StyleSheet.create({
   },
   item: { flex: 1, alignItems: 'center', gap: 3, minHeight: 48, justifyContent: 'center' },
   post: {
-    width: 52,
-    height: 36,
-    borderRadius: 18,
+    width: 48,
+    height: 34,
+    borderRadius: 17,
     backgroundColor: colors.pulso,
     alignItems: 'center',
     justifyContent: 'center',

@@ -1,13 +1,14 @@
 import { router } from 'expo-router';
-import { useMemo, useState } from 'react';
-import { FlatList, StyleSheet, View } from 'react-native';
+import { useState } from 'react';
+import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
 import MapView, { Marker, type MapStyleElement } from 'react-native-maps';
 
 import { PlaceRow } from '@/components/place-row';
+import { RegionChip } from '@/components/region-chip';
 import { Chip, Empty, Screen, Txt } from '@/components/ui';
-import { colors, space } from '@/constants/theme';
-import { useUserLocation } from '@/lib/location';
+import { categoryFilters, categoryLabel, colors, space } from '@/constants/theme';
 import { usePlacesNearby } from '@/lib/queries';
+import { useRegion } from '@/lib/region';
 
 const darkMap: MapStyleElement[] = [
   { elementType: 'geometry', stylers: [{ color: '#17211F' }] },
@@ -19,15 +20,12 @@ const darkMap: MapStyleElement[] = [
   { featureType: 'transit', stylers: [{ visibility: 'off' }] },
 ];
 
+/** Mapa e busca por proximidade (RF-04). Nenhuma posição de outros usuários aparece. */
 export default function Mapa() {
-  const loc = useUserLocation();
-  const places = usePlacesNearby(loc.coords);
-  const [soAgora, setSoAgora] = useState(false);
-
-  const lista = useMemo(
-    () => (places.data ?? []).filter((p) => !soAgora || p.registros_agora > 0),
-    [places.data, soAgora],
-  );
+  const { coords, radius, mode } = useRegion();
+  const [category, setCategory] = useState<string | null>(null);
+  const places = usePlacesNearby({ category });
+  const delta = Math.min(0.6, Math.max(0.03, (radius / 111000) * 2.2));
 
   return (
     <Screen>
@@ -36,43 +34,48 @@ export default function Mapa() {
           style={StyleSheet.absoluteFill}
           customMapStyle={darkMap}
           userInterfaceStyle="dark"
-          showsUserLocation={loc.real}
-          region={{
-            latitude: loc.coords.lat,
-            longitude: loc.coords.lng,
-            latitudeDelta: 0.08,
-            longitudeDelta: 0.08,
-          }}>
-          {lista.map((p) => (
+          showsUserLocation={mode === 'gps'}
+          region={{ latitude: coords.lat, longitude: coords.lng, latitudeDelta: delta, longitudeDelta: delta }}>
+          {(places.data ?? []).map((p) => (
             <Marker
               key={p.id}
               coordinate={{ latitude: p.lat, longitude: p.lng }}
-              title={p.nome}
-              description={p.registros_agora > 0 ? `${p.registros_agora} registros agora` : 'sem registros agora'}
-              pinColor={p.registros_agora > 0 ? colors.pulso : colors.mut}
+              title={p.name}
+              description={p.fresh_posts > 0 ? 'Vídeo recente' : 'Sem atualização recente'}
+              pinColor={p.fresh_posts > 0 ? colors.pulso : colors.mut}
               onCalloutPress={() => router.push({ pathname: '/lugar/[id]', params: { id: p.id } })}
             />
           ))}
         </MapView>
-        <View style={s.filters}>
-          <Chip label="Todos" active={!soAgora} onPress={() => setSoAgora(false)} />
-          <Chip label="Com registro agora" active={soAgora} onPress={() => setSoAgora(true)} />
+        <View style={s.overlay}>
+          <RegionChip />
         </View>
       </View>
-
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        style={{ flexGrow: 0 }}
+        contentContainerStyle={s.chips}>
+        <Chip label="Todos" active={!category} onPress={() => setCategory(null)} />
+        {categoryFilters.map((c) => (
+          <Chip key={c} label={categoryLabel[c]} active={category === c} onPress={() => setCategory(c)} />
+        ))}
+      </ScrollView>
       <FlatList
         style={{ flex: 1 }}
-        contentContainerStyle={{ padding: space.md, gap: space.sm }}
-        data={lista}
+        contentContainerStyle={{ paddingHorizontal: space.md, paddingBottom: space.lg, gap: space.sm }}
+        data={places.data ?? []}
         keyExtractor={(p) => p.id}
         renderItem={({ item }) => <PlaceRow place={item} />}
+        ListEmptyComponent={
+          places.isLoading ? undefined : (
+            <Empty title="Nenhum lugar aqui" text="Tente outra região ou outra categoria." />
+          )
+        }
         ListHeaderComponent={
           <Txt variant="small" color={colors.mut}>
-            {lista.length} lugares {loc.real ? 'perto de você' : 'em Brasília'}
+            {(places.data ?? []).length} lugares
           </Txt>
-        }
-        ListEmptyComponent={
-          places.isLoading ? undefined : <Empty title="Nada por aqui" text="Nenhum lugar com registro agora nesse raio." />
         }
       />
     </Screen>
@@ -80,6 +83,7 @@ export default function Mapa() {
 }
 
 const s = StyleSheet.create({
-  mapWrap: { height: '50%', overflow: 'hidden' },
-  filters: { position: 'absolute', top: space.md, left: space.md, flexDirection: 'row', gap: space.sm },
+  mapWrap: { height: '45%', overflow: 'hidden' },
+  overlay: { position: 'absolute', top: space.md, left: space.md },
+  chips: { gap: space.sm, padding: space.md },
 });

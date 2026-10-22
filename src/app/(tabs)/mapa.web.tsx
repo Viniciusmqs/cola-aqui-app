@@ -1,45 +1,51 @@
-import { useMemo, useState } from 'react';
-import { FlatList, View } from 'react-native';
+import { useState } from 'react';
+import { FlatList, ScrollView, StyleSheet, View } from 'react-native';
 
 import { PlaceRow } from '@/components/place-row';
+import { RegionChip } from '@/components/region-chip';
 import { Chip, Empty, Screen, Txt } from '@/components/ui';
-import { colors, space } from '@/constants/theme';
-import { useUserLocation } from '@/lib/location';
+import { categoryFilters, categoryLabel, colors, space } from '@/constants/theme';
 import { usePlacesNearby } from '@/lib/queries';
 
-/** Na web (pré-visualização) não há mapa nativo: mostramos a lista de lugares. */
+/** Na pré-visualização web não há mapa nativo: mostramos a lista de lugares. */
 export default function MapaWeb() {
-  const loc = useUserLocation();
-  const places = usePlacesNearby(loc.coords);
-  const [soAgora, setSoAgora] = useState(false);
-  const lista = useMemo(
-    () => (places.data ?? []).filter((p) => !soAgora || p.registros_agora > 0),
-    [places.data, soAgora],
-  );
+  const [category, setCategory] = useState<string | null>(null);
+  const places = usePlacesNearby({ category });
 
   return (
     <Screen>
       <FlatList
         contentContainerStyle={{ padding: space.md, gap: space.sm }}
-        data={lista}
+        data={places.data ?? []}
         keyExtractor={(p) => p.id}
         renderItem={({ item }) => <PlaceRow place={item} />}
         ListHeaderComponent={
           <View style={{ gap: space.md, marginBottom: space.sm }}>
-            <Txt variant="title">Mapa</Txt>
+            <View style={s.top}>
+              <Txt variant="title">Mapa</Txt>
+              <RegionChip />
+            </View>
             <Txt variant="small" color={colors.mut}>
               O mapa aparece no app do celular. Aqui vai a lista de lugares.
             </Txt>
-            <View style={{ flexDirection: 'row', gap: space.sm }}>
-              <Chip label="Todos" active={!soAgora} onPress={() => setSoAgora(false)} />
-              <Chip label="Com registro agora" active={soAgora} onPress={() => setSoAgora(true)} />
-            </View>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: space.sm }}>
+              <Chip label="Todos" active={!category} onPress={() => setCategory(null)} />
+              {categoryFilters.map((c) => (
+                <Chip key={c} label={categoryLabel[c]} active={category === c} onPress={() => setCategory(c)} />
+              ))}
+            </ScrollView>
           </View>
         }
         ListEmptyComponent={
-          places.isLoading ? undefined : <Empty title="Nada por aqui" text="Nenhum lugar com registro agora nesse raio." />
+          places.isLoading ? undefined : (
+            <Empty title="Nenhum lugar aqui" text="Tente outra região ou outra categoria." />
+          )
         }
       />
     </Screen>
   );
 }
+
+const s = StyleSheet.create({
+  top: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+});
