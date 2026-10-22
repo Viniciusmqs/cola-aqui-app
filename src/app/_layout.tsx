@@ -1,7 +1,4 @@
-import {
-  BricolageGrotesque_700Bold,
-  BricolageGrotesque_800ExtraBold,
-} from '@expo-google-fonts/bricolage-grotesque';
+import { BricolageGrotesque_700Bold, BricolageGrotesque_800ExtraBold } from '@expo-google-fonts/bricolage-grotesque';
 import { Inter_400Regular, Inter_500Medium, Inter_600SemiBold, Inter_700Bold } from '@expo-google-fonts/inter';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useFonts } from 'expo-font';
@@ -12,11 +9,12 @@ import { useEffect } from 'react';
 
 import { colors } from '@/constants/theme';
 import { AuthProvider, useAuth } from '@/lib/auth';
+import { RegionProvider } from '@/lib/region';
 
 SplashScreen.preventAutoHideAsync();
 
 const queryClient = new QueryClient({
-  defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
+  defaultOptions: { queries: { retry: 2, staleTime: 30_000 } },
 });
 
 const theme = {
@@ -48,11 +46,16 @@ function RootStack() {
   }, [ready]);
   if (!ready) return null;
 
+  // Visitante navega sem conta; login só aparece quando uma ação exige (RF-01, RF-02)
   return (
     <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: colors.carvao } }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="lugar/[id]" />
-      <Stack.Screen name="(auth)" />
+      <Stack.Screen name="entrar" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="regiao" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="reivindicar/[id]" options={{ presentation: 'modal' }} />
+      <Stack.Screen name="parceiro/[id]" />
+      <Stack.Screen name="moderacao" />
     </Stack>
   );
 }
@@ -61,10 +64,12 @@ export default function RootLayout() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
-        <ThemeProvider value={theme}>
-          <StatusBar style="light" />
-          <RootStack />
-        </ThemeProvider>
+        <RegionProvider>
+          <ThemeProvider value={theme}>
+            <StatusBar style="light" />
+            <RootStack />
+          </ThemeProvider>
+        </RegionProvider>
       </AuthProvider>
     </QueryClientProvider>
   );
