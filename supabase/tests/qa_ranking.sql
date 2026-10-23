@@ -230,6 +230,43 @@ begin
   perform pg_temp.ok('Feed devolve a hora de envio para o rótulo', dentro);
 end $$;
 
+-- 14c) só câmera do app, gravado agora
+do $$
+declare
+  a uuid := pg_temp.autor('qa_camera'); -- autor sem posts (não esbarra no limite de 5 por hora)
+  l uuid := pg_temp.lugar('QA Camera', 7);
+  msg text; v uuid; idade numeric;
+begin
+  perform set_config('request.jwt.claims', json_build_object('sub', a, 'role', 'authenticated')::text, true);
+  begin
+    perform public.create_post(l, a || '/g.mp4', 'video/mp4', 1000, 10, null, true, null, now(), 'gallery');
+    msg := 'aceitou';
+  exception when others then msg := sqlerrm; end;
+  perform pg_temp.ok('Vídeo da galeria é recusado', msg like 'Grave o vídeo pela câmera%', msg);
+  begin
+    perform public.create_post(l, a || '/s.mp4', 'video/mp4', 1000, 10, null, true);
+    msg := 'aceitou';
+  exception when others then msg := sqlerrm; end;
+  perform pg_temp.ok('Sem horário de gravação é recusado', msg like 'Grave o vídeo pela câmera%', msg);
+  begin
+    perform public.create_post(l, a || '/v.mp4', 'video/mp4', 1000, 10, null, true, null, now() - interval '11 minutes', 'camera');
+    msg := 'aceitou';
+  exception when others then msg := sqlerrm; end;
+  perform pg_temp.ok('Gravado há mais de 10 min é recusado', msg like '%mais de 10 min%', msg);
+  begin
+    perform public.create_post(l, a || '/f.mp4', 'video/mp4', 1000, 10, null, true, null, now() + interval '5 minutes', 'camera');
+    msg := 'aceitou';
+  exception when others then msg := sqlerrm; end;
+  perform pg_temp.ok('Horário de gravação no futuro é recusado', msg like '%inválido%', msg);
+  select post_id into v from public.create_post(l, a || '/ok.mp4', 'video/mp4', 1000, 10, null, true, null, now() - interval '8 minutes', 'camera');
+  update public.posts set status = 'published', published_at = now() where id = v;
+  select round(extract(epoch from fresh_until - now()) / 60) into idade from public.posts where id = v;
+  perform pg_temp.ok('Gravado há 8 min: janela conta da gravação (~52 min restantes)', idade between 51 and 52, 'restam=' || idade);
+  perform pg_temp.ok('Rótulo usa a hora da gravação',
+    (select sent_at < now() - interval '7 minutes' from public.feed_ranked(-10, -50, 30000, 'agora', null, null, 0, 50) where id = v));
+  perform set_config('request.jwt.claims', '', true);
+end $$;
+
 -- 15) busca de lugares
 do $$
 declare n int; primeiro text;

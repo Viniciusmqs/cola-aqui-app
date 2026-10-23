@@ -2,38 +2,30 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { useQueryClient } from '@tanstack/react-query';
 import { CameraView, useCameraPermissions, useMicrophonePermissions } from 'expo-camera';
 import * as Haptics from 'expo-haptics';
-import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
 import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useEffect, useRef, useState } from 'react';
-import {
-  FlatList,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  TextInput,
-  View,
-} from 'react-native';
+import { FlatList, KeyboardAvoidingView, Platform, Pressable, StyleSheet, TextInput, View } from 'react-native';
 
 import { RegionChip } from '@/components/region-chip';
 import { Button, Empty, LoginGate, Screen, Txt } from '@/components/ui';
 import { categoryLabel, colors, fonts, radius, space } from '@/constants/theme';
 import { useAuth } from '@/lib/auth';
+import { serverNow, useNow } from '@/lib/clock';
 import { distancia, mensagemDeErro } from '@/lib/format';
 import { usePlacesNearby } from '@/lib/queries';
 import { MEDIA_BUCKET, supabase } from '@/lib/supabase';
 import type { NearbyPlace } from '@/lib/types';
 
 const MAX_SEG = 20; // hipótese do PRD (10–20 s); o servidor confere pelo app_config
-const MAX_MB = 60;
+/** Tempo máximo entre gravar e enviar; o servidor confere (app_config.max_record_age_minutes). */
+const MAX_IDADE_MIN = 10;
 
-type Video = { uri: string; mime: string; duration: number | null; size: number | null };
+/** recordedAt: quando a gravação começou, no relógio do servidor (é dela que conta o "Publicado há"). */
+type Video = { uri: string; mime: string; duration: number | null; size: number | null; recordedAt: number };
 type Etapa =
   | { tipo: 'lugar' }
-  | { tipo: 'midia'; lugar: NearbyPlace }
   | { tipo: 'camera'; lugar: NearbyPlace }
   | { tipo: 'revisar'; lugar: NearbyPlace; video: Video }
   | { tipo: 'enviado'; lugar: NearbyPlace; publicado: boolean };
@@ -53,20 +45,11 @@ export default function Publicar() {
   }
 
   switch (etapa.tipo) {
-    case 'midia':
-      return (
-        <EscolherMidia
-          lugar={etapa.lugar}
-          onVoltar={() => setEtapa({ tipo: 'lugar' })}
-          onCamera={() => setEtapa({ tipo: 'camera', lugar: etapa.lugar })}
-          onVideo={(video) => setEtapa({ tipo: 'revisar', lugar: etapa.lugar, video })}
-        />
-      );
     case 'camera':
       return (
         <Camera
           lugar={etapa.lugar}
-          onCancel={() => setEtapa({ tipo: 'midia', lugar: etapa.lugar })}
+          onCancel={() => setEtapa({ tipo: 'lugar' })}
           onGravado={(video) => setEtapa({ tipo: 'revisar', lugar: etapa.lugar, video })}
         />
       );
@@ -75,7 +58,7 @@ export default function Publicar() {
         <Revisar
           lugar={etapa.lugar}
           video={etapa.video}
-          onVoltar={() => setEtapa({ tipo: 'midia', lugar: etapa.lugar })}
+          onGravarDeNovo={() => setEtapa({ tipo: 'camera', lugar: etapa.lugar })}
           onEnviado={(publicado) => setEtapa({ tipo: 'enviado', lugar: etapa.lugar, publicado })}
         />
       );
@@ -99,7 +82,8 @@ export default function Publicar() {
         </Screen>
       );
     default:
-      return <EscolherLugar onEscolher={(lugar) => setEtapa({ tipo: 'midia', lugar })} />;
+      // só câmera do app: escolheu o lugar, abre a câmera (sem galeria, sem vídeo antigo)
+      return <EscolherLugar onEscolher={(lugar) => setEtapa({ tipo: 'camera', lugar })} />;
   }
 }
 
@@ -159,69 +143,6 @@ function EscolherLugar({ onEscolher }: { onEscolher: (p: NearbyPlace) => void })
   );
 }
 
-function EscolherMidia({
-  lugar,
-  onVoltar,
-  onCamera,
-  onVideo,
-}: {
-  lugar: NearbyPlace;
-  onVoltar: () => void;
-  onCamera: () => void;
-  onVideo: (v: Video) => void;
-}) {
-  const [erro, setErro] = useState<string | null>(null);
-
-  async function galeria() {
-    setErro(null);
-    const res = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['videos'],
-      videoMaxDuration: MAX_SEG,
-      allowsEditing: true,
-      quality: 1,
-    });
-    if (res.canceled || !res.assets[0]) return;
-    const a = res.assets[0];
-    const dur = a.duration ? a.duration / 1000 : null;
-    if (dur && dur > MAX_SEG + 0.5) return setErro(`O vídeo pode ter até ${MAX_SEG} segundos. Corte antes de enviar.`);
-    if (a.fileSize && a.fileSize > MAX_MB * 1024 * 1024) return setErro(`O vídeo pode ter até ${MAX_MB} MB.`);
-    onVideo({ uri: a.uri, mime: a.mimeType ?? 'video/mp4', duration: dur, size: a.fileSize ?? null });
-  }
-
-  return (
-    <Screen>
-      <ScrollView contentContainerStyle={{ padding: space.md, gap: space.md }}>
-        <Pressable onPress={onVoltar} hitSlop={12} accessibilityLabel="Voltar">
-          <Ionicons name="chevron-back" size={26} color={colors.neblina} />
-        </Pressable>
-        <Txt variant="title">{lugar.name}</Txt>
-        <Txt color={colors.mut}>
-          Mostre como o lugar está: ambiente, atração, comida, fila. Vídeos de até {MAX_SEG} segundos.
-        </Txt>
-        <Pressable style={s.option} onPress={onCamera} accessibilityRole="button">
-          <Ionicons name="videocam" size={26} color={colors.pulso} />
-          <View style={{ flex: 1 }}>
-            <Txt variant="label">Gravar agora</Txt>
-            <Txt variant="small" color={colors.mut}>
-              Abre a câmera do app
-            </Txt>
-          </View>
-        </Pressable>
-        <Pressable style={s.option} onPress={galeria} accessibilityRole="button">
-          <Ionicons name="images" size={26} color={colors.algodao} />
-          <View style={{ flex: 1 }}>
-            <Txt variant="label">Escolher da galeria</Txt>
-            <Txt variant="small" color={colors.mut}>
-              Um vídeo que você acabou de gravar
-            </Txt>
-          </View>
-        </Pressable>
-        {erro ? <Txt color={colors.erro}>{erro}</Txt> : null}
-      </ScrollView>
-    </Screen>
-  );
-}
-
 function Camera({
   lugar,
   onCancel,
@@ -250,7 +171,7 @@ function Camera({
       <Screen style={{ justifyContent: 'center' }}>
         <Empty
           title="Câmera e microfone"
-          text="Para gravar pelo app, libere a câmera e o microfone. Se preferir, volte e escolha um vídeo da galeria."
+          text="Os vídeos do Cola Aqui são gravados na hora, pela câmera do app. Assim todo mundo sabe que mostram o lugar agora."
           action={
             <View style={{ gap: space.sm }}>
               <Button
@@ -278,11 +199,18 @@ function Camera({
     setSeg(0);
     setGravando(true);
     const inicio = Date.now();
+    const gravadoEm = serverNow();
     try {
       const video = await ref.current.recordAsync({ maxDuration: MAX_SEG });
       if (video?.uri) {
         const mime = video.uri.toLowerCase().endsWith('.mov') ? 'video/quicktime' : 'video/mp4';
-        onGravado({ uri: video.uri, mime, duration: Math.min(MAX_SEG, (Date.now() - inicio) / 1000), size: null });
+        onGravado({
+          uri: video.uri,
+          mime,
+          duration: Math.min(MAX_SEG, (Date.now() - inicio) / 1000),
+          size: null,
+          recordedAt: gravadoEm,
+        });
       }
     } finally {
       setGravando(false);
@@ -310,7 +238,7 @@ function Camera({
         </View>
         <View style={{ alignItems: 'center', gap: space.md }}>
           <Txt variant="label" color={gravando ? colors.rosa : colors.neblina}>
-            {gravando ? `${seg}s / ${MAX_SEG}s` : `Toque para gravar até ${MAX_SEG}s`}
+            {gravando ? `${seg}s / ${MAX_SEG}s` : `Mostre como está agora · até ${MAX_SEG}s`}
           </Txt>
           <Pressable onPress={gravar} style={s.rec} accessibilityLabel={gravando ? 'Parar gravação' : 'Gravar'}>
             <View style={[s.recInner, gravando && s.recStop]} />
@@ -324,14 +252,18 @@ function Camera({
 function Revisar({
   lugar,
   video,
-  onVoltar,
+  onGravarDeNovo,
   onEnviado,
 }: {
   lugar: NearbyPlace;
   video: Video;
-  onVoltar: () => void;
+  onGravarDeNovo: () => void;
   onEnviado: (publicado: boolean) => void;
 }) {
+  const now = useNow();
+  const idadeMin = Math.max(0, (now - video.recordedAt) / 60_000);
+  const venceu = idadeMin >= MAX_IDADE_MIN;
+  const restam = Math.max(0, Math.ceil(MAX_IDADE_MIN - idadeMin));
   const { session } = useAuth();
   const qc = useQueryClient();
   const [legenda, setLegenda] = useState('');
@@ -380,6 +312,8 @@ function Revisar({
         p_caption: legenda,
         p_accept_policies: aceite,
         p_thumb_path: thumbPath,
+        p_recorded_at: new Date(video.recordedAt).toISOString(),
+        p_capture: 'camera',
       });
       if (error) {
         await supabase.storage.from(MEDIA_BUCKET).remove(thumbPath ? [path, thumbPath] : [path]);
@@ -428,6 +362,15 @@ function Revisar({
               publicação.
             </Txt>
           </Pressable>
+          {venceu ? (
+            <Txt color={colors.erro}>
+              Esse vídeo foi gravado há mais de {MAX_IDADE_MIN} min. Grave de novo para mostrar como está agora.
+            </Txt>
+          ) : (
+            <Txt variant="small" color={colors.mut}>
+              Gravado agora. Envie em até {restam} min para ele contar como recente.
+            </Txt>
+          )}
           {erro ? <Txt color={colors.erro}>{erro}</Txt> : null}
           {progresso ? (
             <Txt variant="small" color={colors.mut}>
@@ -435,8 +378,20 @@ function Revisar({
             </Txt>
           ) : null}
           <View style={{ flexDirection: 'row', gap: space.sm }}>
-            <Button title="Voltar" kind="ghost" onPress={onVoltar} disabled={enviando} style={{ flex: 1 }} />
-            <Button title="Enviar" onPress={enviar} loading={enviando} disabled={!aceite} style={{ flex: 2 }} />
+            <Button
+              title="Gravar de novo"
+              kind="ghost"
+              onPress={onGravarDeNovo}
+              disabled={enviando}
+              style={{ flex: 1 }}
+            />
+            <Button
+              title="Enviar"
+              onPress={enviar}
+              loading={enviando}
+              disabled={!aceite || venceu}
+              style={{ flex: 1 }}
+            />
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -461,14 +416,6 @@ const s = StyleSheet.create({
     padding: space.md,
     backgroundColor: colors.carvao2,
     borderRadius: radius.md,
-  },
-  option: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-    padding: space.lg,
-    backgroundColor: colors.carvao2,
-    borderRadius: radius.lg,
   },
   camOverlay: { backgroundColor: 'transparent', justifyContent: 'space-between', padding: space.md },
   camPlace: {

@@ -32,7 +32,7 @@ begin
   select count(*) into n from public.places_nearby(-15.7939, -47.8828, 30000);
   r := r || ' | QA01 anon_lugares=' || n;
   begin
-    perform public.create_post(choro, a || '/x.mp4', 'video/mp4', 1000, 10, 'oi', true);
+    perform public.create_post(choro, a || '/x.mp4', 'video/mp4', 1000, 10, 'oi', true, null, now(), 'camera');
     r := r || ' | anon_posta=ERRO';
   exception when others then r := r || ' | anon_posta=negado';
   end;
@@ -42,16 +42,16 @@ begin
   perform set_config('request.jwt.claims', json_build_object('sub', a, 'role', 'authenticated')::text, true);
   set local role authenticated;
   begin
-    perform public.create_post(choro, a || '/x.mp4', 'video/mp4', 1000, 10, 'oi', false);
+    perform public.create_post(choro, a || '/x.mp4', 'video/mp4', 1000, 10, 'oi', false, null, now(), 'camera');
     r := r || ' | sem_aceite=ERRO';
   exception when others then r := r || ' | sem_aceite=negado';
   end;
   begin
-    perform public.create_post(choro, a || '/longo.mp4', 'video/mp4', 1000, 45, null, true);
+    perform public.create_post(choro, a || '/longo.mp4', 'video/mp4', 1000, 45, null, true, null, now(), 'camera');
     r := r || ' | video_longo=ERRO';
   exception when others then r := r || ' | video_longo=negado';
   end;
-  select post_id, status::text into v_post, st from public.create_post(choro, a || '/x.mp4', 'video/mp4', 1000, 12, 'tá cheio', true);
+  select post_id, status::text into v_post, st from public.create_post(choro, a || '/x.mp4', 'video/mp4', 1000, 12, 'tá cheio', true, null, now(), 'camera');
   r := r || ' | post=' || st;
   reset role;
 
@@ -118,7 +118,7 @@ begin
   exception when others then r := r || ' muda_coordenada=negado';
   end;
   -- post do gestor sai como estabelecimento
-  select post_id into v_post from public.create_post(choro, b || '/e.mp4', 'video/mp4', 1000, 8, null, true);
+  select post_id into v_post from public.create_post(choro, b || '/e.mp4', 'video/mp4', 1000, 8, null, true, null, now(), 'camera');
   select origin::text into st from public.posts where id = v_post;
   r := r || ' | origem_gestor=' || st;
   reset role;
