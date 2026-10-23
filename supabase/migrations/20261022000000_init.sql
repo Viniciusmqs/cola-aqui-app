@@ -779,15 +779,23 @@ create policy "envio na minha pasta" on storage.objects for insert to authentica
   with check (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);
 create policy "apago meus arquivos" on storage.objects for delete to authenticated
   using (bucket_id = 'media' and (storage.foldername(name))[1] = auth.uid()::text);
+-- verificação feita com privilégio do dono: o visitante não enxerga media_assets, só o resultado
+create or replace function public.is_public_media(p_path text)
+returns boolean language sql stable security definer set search_path = public as $$
+  select exists (
+    select 1 from media_assets m join posts p on p.media_id = m.id
+    join places l on l.id = p.place_id and l.status = 'active'
+    where m.path = p_path and p.status = 'published'
+  );
+$$;
+revoke execute on function public.is_public_media(text) from public;
+grant execute on function public.is_public_media(text) to anon, authenticated;
+
 create policy "vejo mídia publicada, minha ou em moderação" on storage.objects for select to anon, authenticated
   using (
     bucket_id = 'media' and (
       (storage.foldername(name))[1] = auth.uid()::text
       or public.is_moderator()
-      or exists (
-        select 1 from public.media_assets m
-        join public.posts p on p.media_id = m.id
-        where m.path = storage.objects.name and p.status = 'published'
-      )
+      or public.is_public_media(name)
     )
   );
