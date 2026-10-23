@@ -1,0 +1,6 @@
+{
+  "confirmacao": "Seu código do Cola Aqui: {{ .Token }}",
+  "recuperacao": "Código para criar uma nova senha: {{ .Token }}",
+  "troca-email": "Confirme seu novo e-mail: {{ .Token }}",
+  "login-codigo": "Seu código para entrar: {{ .Token }}"
+}

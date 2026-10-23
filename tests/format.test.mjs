@@ -111,3 +111,13 @@ test('rótulo usa o "agora" informado (relógio do servidor)', () => {
   const enviado = new Date(SEXTA_21H - 12 * MIN).toISOString();
   assert.equal(rotuloPublicacao(enviado, 'user', SEXTA_21H), 'Publicado há 12 min · Usuário');
 });
+
+test('erros do código de confirmação em português', () => {
+  assert.match(mensagemDeErro(new Error('Token has expired or is invalid')), /Código errado ou vencido/);
+  assert.equal(
+    mensagemDeErro(new Error('For security purposes, you can only request this after 42 seconds.')),
+    'Espere 42 segundos para pedir outro código.',
+  );
+  assert.match(mensagemDeErro(new Error('email rate limit exceeded')), /Muitos e-mails/);
+  assert.match(mensagemDeErro(new Error('Email not confirmed')), /receber o código/);
+});

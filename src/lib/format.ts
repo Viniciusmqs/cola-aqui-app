@@ -90,7 +90,12 @@ export function mensagemDeErro(e: unknown) {
         ? String((e as { message: unknown }).message)
         : String(e);
   if (/Invalid login credentials/i.test(msg)) return 'E-mail ou senha incorretos.';
-  if (/Email not confirmed/i.test(msg)) return 'Confirme seu e-mail pelo link que enviamos antes de entrar.';
+  if (/Email not confirmed/i.test(msg)) return 'Falta confirmar seu e-mail. Toque abaixo para receber o código.';
+  if (/Token has expired or is invalid|otp_expired|invalid.*otp/i.test(msg))
+    return 'Código errado ou vencido. Confira o último e-mail ou peça outro código.';
+  if (/only request this after (\d+) seconds/i.test(msg))
+    return `Espere ${msg.match(/after (\d+) seconds/i)?.[1]} segundos para pedir outro código.`;
+  if (/rate limit/i.test(msg)) return 'Muitos e-mails enviados agora. Tente de novo em alguns minutos.';
   if (/User already registered/i.test(msg)) return 'Esse e-mail já tem conta. Tente entrar.';
   if (/Password should be at least/i.test(msg)) return 'A senha precisa ter pelo menos 6 caracteres.';
   if (/maiores de 18/i.test(msg)) return 'O Cola Aqui é para maiores de 18 anos.';
