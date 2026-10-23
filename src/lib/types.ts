@@ -12,21 +12,32 @@ export type FeedItem = {
   origin: PostOrigin;
   sponsored: boolean;
   published_at: string;
+  /** hora do envio: é dela que conta o "Publicado há X min" e a janela do Agora */
+  sent_at?: string | null;
+  fresh_until?: string | null;
   is_fresh: boolean;
   media_path: string;
   media_mime: string;
+  thumb_path: string | null;
   place_id: string;
   place_name: string;
   place_category: string;
   place_neighborhood: string | null;
   author_username: string;
   distance_m: number;
+  /** pessoas diferentes que publicaram no lugar na última hora (sinal de movimento) */
+  place_recent_authors?: number;
+  place_recent_posts?: number;
+  rank_pos?: number;
+  as_of?: string;
+  server_now?: string;
   media_url?: string | null;
+  thumb_url?: string | null;
 };
 
 export type PlacePost = Omit<
   FeedItem,
-  'place_id' | 'place_name' | 'place_category' | 'place_neighborhood' | 'distance_m'
+  'place_id' | 'place_name' | 'place_category' | 'place_neighborhood' | 'distance_m' | 'place_recent_authors'
 >;
 
 export type NearbyPlace = {
@@ -41,6 +52,7 @@ export type NearbyPlace = {
   distance_m: number;
   fresh_posts: number;
   last_published_at: string | null;
+  recent_authors?: number;
 };
 
 export type PlaceDetail = {
@@ -79,3 +91,5 @@ export type Profile = {
   avatar_url: string | null;
   role: 'user' | 'creator' | 'moderator' | 'admin';
 };
+
+export type PostDetail = FeedItem & { place_address: string | null; lat: number; lng: number };

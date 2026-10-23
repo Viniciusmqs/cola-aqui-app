@@ -30,12 +30,33 @@ if (Platform.OS !== 'web') {
 /** Bucket privado: o vídeo só é entregue quando a publicação está aprovada (QA-05). */
 export const MEDIA_BUCKET = 'media';
 
-/** URLs temporárias para uma lista de arquivos (uma chamada só). */
+/**
+ * URLs temporárias para uma lista de arquivos (uma chamada só).
+ * Links valem 3 h e ficam guardados em memória: o mesmo arquivo recebe o mesmo link enquanto
+ * faltar mais de 1 h para vencer, então a miniatura vem do cache e o vídeo não recarrega a cada página.
+ */
+const VALIDADE_S = 3 * 60 * 60; // curto o bastante para um vídeo removido não circular por muito tempo
+const MARGEM_MS = 60 * 60 * 1000;
+const cache = new Map<string, { url: string; vence: number }>();
+
 export async function signedUrls(paths: string[]) {
   const unique = [...new Set(paths)];
-  if (unique.length === 0) return new Map<string, string>();
-  const { data } = await supabase.storage.from(MEDIA_BUCKET).createSignedUrls(unique, 60 * 60);
   const map = new Map<string, string>();
-  for (const item of data ?? []) if (item.path && item.signedUrl) map.set(item.path, item.signedUrl);
+  const agora = Date.now();
+  const faltam: string[] = [];
+  for (const p of unique) {
+    const c = cache.get(p);
+    if (c && c.vence - agora > MARGEM_MS) map.set(p, c.url);
+    else faltam.push(p);
+  }
+  if (faltam.length === 0) return map;
+  const { data } = await supabase.storage.from(MEDIA_BUCKET).createSignedUrls(faltam, VALIDADE_S);
+  for (const item of data ?? []) {
+    if (item.path && item.signedUrl) {
+      map.set(item.path, item.signedUrl);
+      cache.set(item.path, { url: item.signedUrl, vence: agora + VALIDADE_S * 1000 });
+    }
+  }
+  if (cache.size > 2000) cache.clear();
   return map;
 }

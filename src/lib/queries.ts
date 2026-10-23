@@ -2,39 +2,122 @@ import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tansta
 
 import { track } from './analytics';
 import { useAuth } from './auth';
+import { adjustFromServer, serverNow } from './clock';
 import { useRegion } from './region';
+import { loadSeen, seenSnapshot } from './seen';
 import { signedUrls, supabase } from './supabase';
-import type { FeedItem, FeedMode, NearbyPlace, PlaceDetail, PlaceEvent, PlaceHour, PlacePost, Profile } from './types';
+import type {
+  FeedItem,
+  FeedMode,
+  NearbyPlace,
+  PlaceDetail,
+  PlaceEvent,
+  PlaceHour,
+  PlacePost,
+  PostDetail,
+  Profile,
+} from './types';
 
 const r3 = (n: number) => Math.round(n * 1000) / 1000;
 const PAGE = 15;
 
-async function withMedia<T extends { media_path: string }>(rows: T[]) {
-  const urls = await signedUrls(rows.map((r) => r.media_path));
-  return rows.map((r) => ({ ...r, media_url: urls.get(r.media_path) ?? null }));
+/** Gera links temporários do vídeo e da miniatura numa chamada só. */
+async function withMedia<T extends { media_path: string; thumb_path?: string | null }>(rows: T[]) {
+  const paths = rows.flatMap((r) => (r.thumb_path ? [r.media_path, r.thumb_path] : [r.media_path]));
+  const urls = await signedUrls(paths);
+  return rows.map((r) => ({
+    ...r,
+    media_url: urls.get(r.media_path) ?? null,
+    thumb_url: r.thumb_path ? (urls.get(r.thumb_path) ?? null) : null,
+  }));
 }
 
-/** Feed Explorar paginado por cursor (RF-03). */
-export function useExploreFeed(mode: FeedMode, category: string | null) {
+/**
+ * Feed Explorar (RF-03) ordenado por relevância no servidor (feed_ranked).
+ * Cada abertura ou atualização (foto = contador) pede a 1ª página sem horário: o servidor usa a hora dele e
+ * devolve esse instante (as_of). As páginas seguintes reutilizam o mesmo instante, então a lista não muda de
+ * ordem enquanto a pessoa rola, mesmo se o relógio do celular estiver errado. Novos vídeos: useNewPosts.
+ */
+type FeedPage = { rows: (FeedItem & { media_url: string | null; thumb_url: string | null })[]; asOf: string | null };
+type FeedCursor = { offset: number; asOf: string | null };
+
+export function useExploreFeed(mode: FeedMode, category: string | null, foto: number) {
   const { coords, radius } = useRegion();
   return useInfiniteQuery({
-    queryKey: ['feed', mode, category, r3(coords.lat), r3(coords.lng), radius],
-    initialPageParam: null as string | null,
-    queryFn: async ({ pageParam }) => {
-      const { data, error } = await supabase.rpc('explore_feed', {
+    queryKey: ['feed', mode, category, r3(coords.lat), r3(coords.lng), radius, foto],
+    initialPageParam: { offset: 0, asOf: null } as FeedCursor,
+    queryFn: async ({ pageParam }): Promise<FeedPage> => {
+      if (pageParam.offset === 0) await loadSeen();
+      const started = Date.now();
+      const { data, error } = await supabase.rpc('feed_ranked', {
         p_lat: coords.lat,
         p_lng: coords.lng,
         p_radius_m: radius,
         p_mode: mode,
         p_category: category,
-        p_before: pageParam,
+        p_as_of: pageParam.asOf,
+        p_offset: pageParam.offset,
         p_limit: PAGE,
+        p_seen: seenFor(foto),
       });
       if (error) throw error;
-      return withMedia((data ?? []) as FeedItem[]);
+      const rows = (data ?? []) as FeedItem[];
+      adjustFromServer(rows[0]?.server_now, started);
+      // sem vídeo, a foto vale "agora" pelo relógio do servidor (estimado) — o aviso de novos conta a partir daí
+      const asOf = rows[0]?.as_of ?? pageParam.asOf ?? new Date(serverNow()).toISOString();
+      return { rows: await withMedia(rows), asOf };
     },
-    getNextPageParam: (last) => (last.length < PAGE ? null : (last.at(-1)?.published_at ?? null)),
-    refetchInterval: 60_000,
+    getNextPageParam: (last, all): FeedCursor | null =>
+      last.rows.length < PAGE ? null : { offset: all.reduce((n, p) => n + p.rows.length, 0), asOf: last.asOf },
+    staleTime: Infinity, // a foto só muda quando a pessoa atualiza
+    gcTime: 10 * 60_000,
+    // ao atualizar o MESMO filtro, a lista antiga fica na tela até a nova chegar (sem piscar o esqueleto);
+    // trocando Agora/Hoje ou categoria, mostra o esqueleto (lista velha ali seria enganosa)
+    placeholderData: (prev, prevQuery) => {
+      const k = prevQuery?.queryKey;
+      const mesmoFiltro =
+        !!k &&
+        k[1] === mode &&
+        k[2] === category &&
+        k[3] === r3(coords.lat) &&
+        k[4] === r3(coords.lng) &&
+        k[5] === radius;
+      return mesmoFiltro ? prev : undefined;
+    },
+  });
+}
+
+// lista de vistos congelada por foto: todas as páginas da mesma foto rebaixam os mesmos vídeos
+const seenByFoto = new Map<number, string[]>();
+function seenFor(foto: number) {
+  let v = seenByFoto.get(foto);
+  if (!v) {
+    v = seenSnapshot();
+    seenByFoto.clear();
+    seenByFoto.set(foto, v);
+  }
+  return v;
+}
+
+/** Quantos vídeos novos chegaram desde a foto do feed (aviso "N vídeos novos"). asOf vem do servidor. */
+export function useNewPosts(category: string | null, asOf: string | null, enabled: boolean) {
+  const { coords, radius } = useRegion();
+  return useQuery({
+    queryKey: ['feed-new', category, r3(coords.lat), r3(coords.lng), radius, asOf],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('feed_new_count', {
+        p_lat: coords.lat,
+        p_lng: coords.lng,
+        p_radius_m: radius,
+        p_category: category,
+        p_since: asOf,
+      });
+      if (error) throw error;
+      return (data as number | null) ?? 0;
+    },
+    enabled: enabled && !!asOf,
+    refetchInterval: 45_000,
+    refetchIntervalInBackground: false,
   });
 }
 
@@ -197,6 +280,37 @@ export function useToggleSave() {
         track('place_save', { place: placeId });
       }
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['saved'] }),
+    // muda na hora (otimista); se o servidor recusar, volta e o erro aparece
+    onMutate: async ({ placeId, saved }) => {
+      const key = ['saved', session?.user.id];
+      await qc.cancelQueries({ queryKey: key });
+      const antes = qc.getQueryData<SavedRow[]>(key);
+      qc.setQueryData<SavedRow[]>(key, (old = []) =>
+        saved
+          ? old.filter((r) => r.place_id !== placeId)
+          : [{ place_id: placeId, created_at: new Date().toISOString(), place: null }, ...old],
+      );
+      return { antes, key };
+    },
+    onError: (_e, _v, ctx) => {
+      if (ctx) qc.setQueryData(ctx.key, ctx.antes);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: ['saved'] }),
+  });
+}
+
+type SavedRow = { place_id: string; created_at: string; place: unknown };
+
+/** Uma publicação aprovada, para o player em tela cheia. */
+export function usePost(id: string) {
+  return useQuery({
+    queryKey: ['post', id],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc('post_detail', { p_post: id });
+      if (error) throw error;
+      const row = ((data ?? []) as PostDetail[])[0];
+      if (!row) return null;
+      return (await withMedia([row]))[0];
+    },
   });
 }

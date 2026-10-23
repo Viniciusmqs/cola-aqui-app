@@ -18,8 +18,8 @@ export const origemLabel: Record<PostOrigin, string> = {
 };
 
 /** "Publicado há 8 min · Usuário" (PRD 5.1). */
-export function rotuloPublicacao(iso: string, origin: PostOrigin) {
-  return `Publicado ${tempoDesde(iso)} · ${origemLabel[origin]}`;
+export function rotuloPublicacao(iso: string, origin: PostOrigin, now: number = Date.now()) {
+  return `Publicado ${tempoDesde(iso, now)} · ${origemLabel[origin]}`;
 }
 
 export function distancia(m: number) {
@@ -30,14 +30,17 @@ export function distancia(m: number) {
 const DIAS = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
 export const diaSemana = (n: number) => DIAS.at(n) ?? '';
 
-export function dataEvento(iso: string) {
-  const d = new Date(iso);
-  const hoje = new Date();
-  const amanha = new Date(Date.now() + 86400000);
-  const hora = d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
-  if (d.toDateString() === hoje.toDateString()) return `Hoje · ${hora}`;
-  if (d.toDateString() === amanha.toDateString()) return `Amanhã · ${hora}`;
-  return `${diaSemana(d.getDay())}, ${d.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' })} · ${hora}`;
+/** "Hoje · 20:30", "Amanhã · 23:00" ou "Sábado, 25/10 · 21:00" — sempre no horário de Brasília. */
+export function dataEvento(iso: string, now: number = Date.now()) {
+  const d = new Date(new Date(iso).getTime() - 3 * 3600 * 1000);
+  const n = new Date(now - 3 * 3600 * 1000);
+  const dia = (x: Date) => Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate());
+  const diff = Math.round((dia(d) - dia(n)) / 86400000);
+  const p2 = (v: number) => String(v).padStart(2, '0');
+  const hora = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
+  if (diff === 0) return `Hoje · ${hora}`;
+  if (diff === 1) return `Amanhã · ${hora}`;
+  return `${diaSemana(d.getUTCDay())}, ${p2(d.getUTCDate())}/${p2(d.getUTCMonth() + 1)} · ${hora}`;
 }
 
 export const horaCurta = (t: string) => t.slice(0, 5);
@@ -96,4 +99,48 @@ export function mensagemDeErro(e: unknown) {
   if (/Network request failed|Failed to fetch/i.test(msg)) return 'Sem conexão. Confere a internet e tenta de novo.';
   if (/JWT|session/i.test(msg)) return 'Sua sessão expirou. Entre de novo.';
   return msg;
+}
+
+// ---------- "aberto agora" pelo horário informado (PRD 3.1) ----------
+// Brasília não tem horário de verão desde 2019: UTC−3 fixo, independente do fuso do aparelho.
+const BRT_MS = 3 * 3600 * 1000;
+
+/** Dia da semana (0 = domingo) e minuto do dia em Brasília. */
+export function agoraBrasilia(now: number = Date.now()) {
+  const d = new Date(now - BRT_MS);
+  return { weekday: d.getUTCDay(), min: d.getUTCHours() * 60 + d.getUTCMinutes() };
+}
+
+const paraMin = (t: string) => {
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + (m || 0);
+};
+
+type Faixa = { weekday: number; opens: string; closes: string };
+
+/**
+ * Situação pelo horário informado. Fechamento menor ou igual à abertura = vira a noite
+ * (ex.: 23:00–05:00 de sexta fica aberto até 05:00 de sábado).
+ */
+export function situacaoHorario(hours: Faixa[], now: number = Date.now()) {
+  if (hours.length === 0) return null;
+  const { weekday, min } = agoraBrasilia(now);
+  const ontem = (weekday + 6) % 7;
+
+  for (const h of hours) {
+    const abre = paraMin(h.opens);
+    const fecha = paraMin(h.closes);
+    const vira = fecha <= abre;
+    if (h.weekday === weekday && min >= abre && (vira || min < fecha)) {
+      return { aberto: true, texto: `Aberto agora · fecha às ${horaCurta(h.closes)}` };
+    }
+    if (h.weekday === ontem && vira && min < fecha) {
+      return { aberto: true, texto: `Aberto agora · fecha às ${horaCurta(h.closes)}` };
+    }
+  }
+  const proxima = hours
+    .filter((h) => h.weekday === weekday && paraMin(h.opens) > min)
+    .sort((a, b) => paraMin(a.opens) - paraMin(b.opens))[0];
+  if (proxima) return { aberto: false, texto: `Fechado agora · abre às ${horaCurta(proxima.opens)}` };
+  return { aberto: false, texto: 'Fechado agora' };
 }

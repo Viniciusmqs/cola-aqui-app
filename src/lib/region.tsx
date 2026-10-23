@@ -83,6 +83,17 @@ export function RegionProvider({ children }: { children: ReactNode }) {
         setMode('region');
         return;
       }
+      // Não abre o pedido do sistema sozinho: a tela de boas-vindas explica antes (boa prática de permissão).
+      // Só lê o GPS direto se a pessoa já tinha permitido.
+      try {
+        const perm = await Location.getForegroundPermissionsAsync();
+        if (perm.status !== 'granted') {
+          if (perm.status === 'denied' && !perm.canAskAgain) setGps('negado');
+          return;
+        }
+      } catch {
+        return;
+      }
       const ok = await readGps();
       if (vivo && ok) setMode('gps');
     })();
