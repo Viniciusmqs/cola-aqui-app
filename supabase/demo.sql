@@ -1,7 +1,8 @@
 -- Cola Aqui · dados de demonstração para testar o app.
 -- Pode rodar quantas vezes quiser: apaga a demo anterior e recria com horários relativos a agora
 -- (os vídeos "recentes" voltam a ficar dentro da janela de 60 min).
--- Vídeos: arquivos em storage/media/demo/*.mp4 (imagens geradas por IA, só para teste).
+-- Vídeos: storage/media/demo/*.mp4 e miniaturas em demo/thumbs/*.jpg (imagens geradas por IA, só para teste).
+-- O agendamento cola_aqui_demo_refresh (migração v1) mantém os horários relativos a agora.
 -- Usuários demo_* não fazem login. Lugares com "(demo)" no nome são fictícios.
 
 do $demo$
@@ -77,7 +78,7 @@ begin
   update public.places set organization_id = org_roof where id = p_roof;
   insert into public.partner_members (organization_id, user_id, role) values (org_roof, u_roof, 'owner');
 
-  -- mídia
+  -- mídia (miniatura em demo/thumbs/<nome>.jpg)
   insert into public.media_assets (owner, path, mime, size_bytes, duration_s, status) values
     (u_ana, 'demo/choro_1.mp4', 'video/mp4', 500000, 6, 'ready'),
     (u_rafa, 'demo/choro_2.mp4', 'video/mp4', 500000, 6, 'ready'),
@@ -94,12 +95,13 @@ begin
     (u_cri, 'demo/festa_2.mp4', 'video/mp4', 500000, 6, 'ready'),
     (u_rafa, 'demo/happy_2.mp4', 'video/mp4', 500000, 6, 'ready');
 
+  update public.media_assets
+     set thumbnail_path = 'demo/thumbs/' || replace(split_part(path, '/', 2), '.mp4', '.jpg')
+   where path like 'demo/%';
+
   -- publicações: várias dentro da janela de 60 min, outras de hoje e de ontem
-  insert into public.posts (author, place_id, media_id, caption, origin, sponsored, status, created_at, published_at, fresh_until)
-  select v.author, v.place, m.id, v.caption, v.origin::public.post_origin, v.sponsored, 'published',
-         now() - make_interval(mins => v.ago + 2), now() - make_interval(mins => v.ago),
-         now() - make_interval(mins => v.ago) + interval '60 minutes'
-  from (values
+  create temp table _demo (author uuid, place uuid, path text, caption text, origin text, sponsored boolean, ago int) on commit drop;
+  insert into _demo values
     (u_ana, p_choro, 'demo/choro_1.mp4', 'Roda de samba começando, ainda tem mesa', 'user', false, 4),
     (u_roof, p_roof, 'demo/rooftop_1.mp4', 'Pôr do sol com DJ até as 22h', 'establishment', true, 9),
     (u_lu, p_boate, 'demo/boate_1.mp4', 'Pista enchendo, fila andando rápido', 'user', false, 14),
@@ -113,9 +115,19 @@ begin
     (u_rafa, p_choro, 'demo/choro_2.mp4', null, 'user', false, 210),
     (u_ana, p_arena, 'demo/arena_2.mp4', 'Passagem de som', 'user', false, 300),
     (u_cri, p_terraco, 'demo/festa_2.mp4', 'Brinde de sexta', 'creator', false, 1500),
-    (u_rafa, p_boteco, 'demo/happy_2.mp4', 'Chopp gelado e mesa na calçada', 'user', false, 1700)
-  ) as v(author, place, path, caption, origin, sponsored, ago)
-  join public.media_assets m on m.path = v.path;
+    (u_rafa, p_boteco, 'demo/happy_2.mp4', 'Chopp gelado e mesa na calçada', 'user', false, 1700);
+
+  insert into public.posts (author, place_id, media_id, caption, origin, sponsored, status, created_at, published_at, fresh_until)
+  select v.author, v.place, m.id, v.caption, v.origin::public.post_origin, v.sponsored, 'published',
+         now() - make_interval(mins => v.ago), now() - make_interval(mins => v.ago),
+         now() - make_interval(mins => v.ago) + interval '60 minutes'
+  from _demo v join public.media_assets m on m.path = v.path;
+
+  -- registra os posts de demo para o agendamento manter os horários relativos a agora
+  insert into public.demo_posts (post_id, ago_min)
+  select p.id, v.ago from _demo v
+  join public.media_assets m on m.path = v.path
+  join public.posts p on p.media_id = m.id;
 
   -- horários informados
   insert into public.place_hours (place_id, weekday, opens, closes)
