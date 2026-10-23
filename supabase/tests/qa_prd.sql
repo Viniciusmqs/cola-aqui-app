@@ -57,7 +57,7 @@ begin
 
   -- QA-05 pendente não aparece para visitante
   set local role anon;
-  select count(*) into n from public.place_posts(choro);
+  select count(*) into n from public.place_posts(choro) where id = v_post;
   r := r || ' | QA05 pendente_publico=' || n;
   reset role;
 
