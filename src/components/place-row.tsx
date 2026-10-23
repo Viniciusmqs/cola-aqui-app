@@ -9,7 +9,8 @@ import { Txt } from './ui';
 
 /** Lugar em lista. Sem post recente: "Sem atualização recente", nunca movimento simulado (PRD 3.1, QA-12). */
 export function PlaceRow({ place }: { place: NearbyPlace }) {
-  const recente = place.fresh_posts > 0;
+  const qtd = Number(place.fresh_posts) || 0; // bigint pode chegar como texto
+  const recente = qtd > 0;
   return (
     <Pressable
       onPress={() => router.push({ pathname: '/lugar/[id]', params: { id: place.id } })}
@@ -28,7 +29,7 @@ export function PlaceRow({ place }: { place: NearbyPlace }) {
       <View style={{ alignItems: 'flex-end', maxWidth: 130 }}>
         {recente ? (
           <Txt variant="small" color={colors.pulso}>
-            {place.fresh_posts === 1 ? '1 vídeo recente' : `${place.fresh_posts} vídeos recentes`}
+            {qtd === 1 ? '1 vídeo recente' : `${qtd} vídeos recentes`}
           </Txt>
         ) : (
           <Txt variant="caption" color={colors.mut} style={{ textAlign: 'right' }}>

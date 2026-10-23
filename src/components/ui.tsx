@@ -18,8 +18,11 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { colors, fonts, radius, space } from '@/constants/theme';
+import { useNow } from '@/lib/clock';
 import { rotuloPublicacao } from '@/lib/format';
 import type { PostOrigin } from '@/lib/types';
+
+import { BrandLogo, PulseDot } from './brand';
 
 type Variant = 'display' | 'title' | 'body' | 'label' | 'small' | 'caption';
 
@@ -57,16 +60,9 @@ export function Screen({
   );
 }
 
+/** Logo oficial (assinatura horizontal, vetor do pacote de marca — nunca redigitado). */
 export function Logo({ size = 28 }: { size?: number }) {
-  return (
-    <Txt variant="title" style={{ fontSize: size, lineHeight: size * 1.05 }}>
-      cola
-      <Txt variant="title" color={colors.pulso} style={{ fontSize: size, lineHeight: size * 1.05 }}>
-        {' '}
-        aqui
-      </Txt>
-    </Txt>
-  );
+  return <BrandLogo height={size} />;
 }
 
 type ButtonProps = Omit<PressableProps, 'style'> & {
@@ -193,24 +189,32 @@ const c = StyleSheet.create({
   },
 });
 
-/** "Publicado há 8 min · Usuário" + selo de patrocínio quando houver (PRD 5.1, 5.3). */
+/**
+ * "Publicado há 8 min · Usuário" + selo de patrocínio (PRD 5.1, 5.3).
+ * O texto anda sozinho (relógio do servidor, a cada 30 s) e o ponto apaga quando o vídeo sai da janela de 60 min.
+ */
 export function PublishedTag({
   publishedAt,
   origin,
   sponsored,
-  fresh,
+  freshUntil,
 }: {
   publishedAt: string;
   origin: PostOrigin;
   sponsored?: boolean;
+  freshUntil?: string | null;
+  /** mantido por compatibilidade; o frescor é calculado ao vivo */
   fresh?: boolean;
 }) {
+  const now = useNow();
+  const limite = freshUntil ? Date.parse(freshUntil) : Date.parse(publishedAt) + 60 * 60_000;
+  const recente = limite > now;
   return (
     <View style={o.row}>
-      <View style={o.tag}>
-        <View style={[o.dot, { backgroundColor: fresh ? colors.pulso : colors.mut }]} />
+      <View style={o.tag} accessibilityLabel={rotuloPublicacao(publishedAt, origin, now)}>
+        <PulseDot color={recente ? colors.pulso : colors.mut} active={recente} />
         <Txt variant="caption" color={colors.neblina}>
-          {rotuloPublicacao(publishedAt, origin)}
+          {rotuloPublicacao(publishedAt, origin, now)}
         </Txt>
       </View>
       {sponsored ? (
@@ -236,7 +240,6 @@ const o = StyleSheet.create({
     paddingVertical: 5,
     borderRadius: radius.pill,
   },
-  dot: { width: 7, height: 7, borderRadius: 4 },
 });
 
 /** Bloco para abas que exigem conta (Publicar, Salvos, Perfil). */
