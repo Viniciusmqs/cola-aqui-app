@@ -2,7 +2,7 @@
   "expo": {
     "name": "Cola Aqui",
     "slug": "cola-aqui",
-    "version": "0.1.0",
+    "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "colaaqui",
@@ -36,7 +36,8 @@
         {
           "backgroundColor": "#17211F",
           "image": "./assets/images/splash-icon.png",
-          "imageWidth": 120
+          "imageWidth": 240,
+          "resizeMode": "contain"
         }
       ],
       [
@@ -50,7 +51,7 @@
       [
         "expo-location",
         {
-          "locationWhenInUsePermission": "O Cola Aqui usa sua localização para mostrar o que tá rolando perto de você e confirmar que o registro foi feito no lugar."
+          "locationWhenInUsePermission": "O Cola Aqui usa sua localização para mostrar o que está rolando perto de você. Ela não é salva nem aparece para ninguém."
         }
       ],
       "expo-video",
