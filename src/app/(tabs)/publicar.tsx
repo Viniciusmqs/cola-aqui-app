@@ -5,6 +5,7 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { useVideoPlayer, VideoView } from 'expo-video';
+import * as VideoThumbnails from 'expo-video-thumbnails';
 import { useEffect, useRef, useState } from 'react';
 import {
   FlatList,
@@ -355,6 +356,20 @@ function Revisar({
       const up = await supabase.storage.from(MEDIA_BUCKET).upload(path, body, { contentType: video.mime });
       if (up.error) throw up.error;
 
+      // miniatura (capa enquanto o vídeo carrega no feed); se falhar, publica sem ela
+      let thumbPath: string | null = null;
+      if (Platform.OS !== 'web') {
+        try {
+          const thumb = await VideoThumbnails.getThumbnailAsync(video.uri, { time: 500, quality: 0.7 });
+          const tBody = await (await fetch(thumb.uri)).arrayBuffer();
+          const tPath = `${session.user.id}/${Date.now()}_thumb.jpg`;
+          const tUp = await supabase.storage.from(MEDIA_BUCKET).upload(tPath, tBody, { contentType: 'image/jpeg' });
+          if (!tUp.error) thumbPath = tPath;
+        } catch {
+          thumbPath = null;
+        }
+      }
+
       setProgresso('Registrando publicação…');
       const { data, error } = await supabase.rpc('create_post', {
         p_place: lugar.id,
@@ -364,9 +379,10 @@ function Revisar({
         p_duration_s: video.duration,
         p_caption: legenda,
         p_accept_policies: aceite,
+        p_thumb_path: thumbPath,
       });
       if (error) {
-        await supabase.storage.from(MEDIA_BUCKET).remove([path]);
+        await supabase.storage.from(MEDIA_BUCKET).remove(thumbPath ? [path, thumbPath] : [path]);
         throw error;
       }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
