@@ -1,18 +1,31 @@
 import Ionicons from '@expo/vector-icons/Ionicons';
+import * as Haptics from 'expo-haptics';
 import * as Linking from 'expo-linking';
-import { router, useLocalSearchParams } from 'expo-router';
-import { useEffect, useMemo, useState } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { router, useIsFocused, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, FlatList, Pressable, ScrollView, StyleSheet, View, type ListViewToken } from 'react-native';
 
 import { ChoiceSheet } from '@/components/choice-sheet';
+import { PulseDot } from '@/components/brand';
 import { PlacePostCard } from '@/components/post-card';
+import { PlaceSkeleton } from '@/components/skeleton';
 import { Button, Empty, Screen, SectionTitle, Txt } from '@/components/ui';
 import { categoryLabel, colors, radius, space } from '@/constants/theme';
 import { abrirRota, compartilharLugar, denunciaChoices, denunciar, rotaChoices } from '@/lib/actions';
 import { track } from '@/lib/analytics';
 import { useAuth, useRequireAuth } from '@/lib/auth';
-import { dataEvento, diaSemana, horaCurta, tempoDesde } from '@/lib/format';
+import { useNow } from '@/lib/clock';
+import {
+  agoraBrasilia,
+  dataEvento,
+  diaSemana,
+  horaCurta,
+  mensagemDeErro,
+  situacaoHorario,
+  tempoDesde,
+} from '@/lib/format';
 import { usePlace, usePlaceInfo, usePlacePosts, useSaved, useToggleSave } from '@/lib/queries';
+import type { PlacePost } from '@/lib/types';
 
 /** Perfil do lugar (RF-05) com compartilhar, chegar e salvar (RF-08, RF-09). */
 export default function Lugar() {
@@ -27,6 +40,13 @@ export default function Lugar() {
   const [rota, setRota] = useState(false);
   const [denuncia, setDenuncia] = useState(false);
   const [visivel, setVisivel] = useState<string | null>(null);
+  const focado = useIsFocused();
+  const agora = useNow(); // hora do servidor, anda sozinha a cada 30 s
+
+  // toca só o vídeo mais visível da fileira (mudo); toque abre em tela cheia
+  const onViewable = useCallback(({ viewableItems }: { viewableItems: ListViewToken[] }) => {
+    setVisivel((viewableItems[0]?.item as PlacePost | undefined)?.id ?? null);
+  }, []);
 
   useEffect(() => {
     if (id) track('place_view', { place: id });
@@ -39,14 +59,19 @@ export default function Lugar() {
 
   const p = place.data;
   const lista = posts.data ?? [];
-  const hoje = new Date().getDay();
+  const hoje = agoraBrasilia(agora).weekday;
   const horariosHoje = (info.data?.hours ?? []).filter((h) => h.weekday === hoje);
+  const situacao = situacaoHorario(info.data?.hours ?? [], agora);
 
   if (!p) {
     return (
       <Screen>
         <BackBar />
-        {place.isLoading ? null : <Empty title="Lugar não encontrado" text="Ele pode ter saído do catálogo." />}
+        {place.isLoading ? (
+          <PlaceSkeleton />
+        ) : (
+          <Empty title="Lugar não encontrado" text="Ele pode ter saído do catálogo." />
+        )}
       </Screen>
     );
   }
@@ -79,9 +104,20 @@ export default function Lugar() {
             color={p.last_published_at ? colors.neblina : colors.mut}
             style={{ marginTop: space.sm }}>
             {p.last_published_at
-              ? `Último vídeo publicado ${tempoDesde(p.last_published_at)}`
+              ? `Último vídeo publicado ${tempoDesde(p.last_published_at, agora)}`
               : 'Sem atualização recente'}
           </Txt>
+          {situacao ? (
+            <View style={s.status} accessibilityLabel={`${situacao.texto}, pelo horário informado`}>
+              <PulseDot color={situacao.aberto ? colors.pulso : colors.mut} active={false} />
+              <Txt variant="small" color={situacao.aberto ? colors.neblina : colors.mut}>
+                {situacao.texto}
+              </Txt>
+              <Txt variant="caption" color={colors.mut}>
+                pelo horário informado
+              </Txt>
+            </View>
+          ) : null}
         </View>
 
         <View style={{ gap: space.sm, marginTop: space.lg }}>
@@ -102,8 +138,14 @@ export default function Lugar() {
                   color={salvo ? colors.pulso : colors.neblina}
                 />
               }
-              loading={toggle.isPending}
-              onPress={() => requireAuth('salvar') && toggle.mutate({ placeId: p.id, saved: salvo })}
+              onPress={() => {
+                if (!requireAuth('salvar')) return;
+                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+                toggle.mutate(
+                  { placeId: p.id, saved: salvo },
+                  { onError: (e) => Alert.alert('Não deu para salvar', mensagemDeErro(e)) },
+                );
+              }}
             />
             <Button
               title="Compartilhar"
@@ -125,12 +167,10 @@ export default function Lugar() {
             keyExtractor={(x) => x.id}
             showsHorizontalScrollIndicator={false}
             contentContainerStyle={{ gap: space.sm }}
+            onViewableItemsChanged={onViewable}
+            viewabilityConfig={{ itemVisiblePercentThreshold: 60 }}
             renderItem={({ item }) => (
-              <Pressable
-                onPress={() => setVisivel(visivel === item.id ? null : item.id)}
-                accessibilityLabel="Tocar ou pausar vídeo">
-                <PlacePostCard post={item} placeId={p.id} playing={visivel === item.id} />
-              </Pressable>
+              <PlacePostCard post={item} placeId={p.id} playing={focado && visivel === item.id} />
             )}
           />
         )}
@@ -141,7 +181,7 @@ export default function Lugar() {
             {(info.data?.events ?? []).map((e) => (
               <View key={e.id} style={s.card}>
                 <Txt variant="small" color={colors.pulso}>
-                  {dataEvento(e.starts_at)}
+                  {dataEvento(e.starts_at, agora)}
                 </Txt>
                 <Txt variant="label">{e.title}</Txt>
                 {e.description ? (
@@ -279,4 +319,5 @@ const s = StyleSheet.create({
   badge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: radius.pill },
   card: { gap: 4, padding: space.md, backgroundColor: colors.carvao2, borderRadius: radius.md, marginBottom: space.sm },
   hourRow: { flexDirection: 'row', justifyContent: 'space-between' },
+  status: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginTop: 2 },
 });
